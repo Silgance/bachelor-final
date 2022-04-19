@@ -1,37 +1,3 @@
-// This is an advanced implementation of the algorithm described in the
-// following paper:
-//   J. Zhang and S. Singh. LOAM: Lidar Odometry and Mapping in Real-time.
-//     Robotics: Science and Systems Conference (RSS). Berkeley, CA, July 2014.
-
-// Modifier: Livox               dev@livoxtech.com
-
-// Copyright 2013, Ji Zhang, Carnegie Mellon University
-// Further contributions copyright (c) 2016, Southwest Research Institute
-// All rights reserved.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
-//
-// 1. Redistributions of source code must retain the above copyright notice,
-//    this list of conditions and the following disclaimer.
-// 2. Redistributions in binary form must reproduce the above copyright notice,
-//    this list of conditions and the following disclaimer in the documentation
-//    and/or other materials provided with the distribution.
-// 3. Neither the name of the copyright holder nor the names of its
-//    contributors may be used to endorse or promote products derived from this
-//    software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 #include <omp.h>
 #include <mutex>
@@ -67,11 +33,24 @@
 
 
 
+
+
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "ivox3d/ivox3d.h"
 #include <livox_ros_driver/CustomMsg.h>
+#include "pointcloud_preprocess.h"
+#include "options.h"
+#include "faster_common_lib.h"
+// #include "imu_processing.hpp"
+#include <condition_variable>
+#include "use-ikfom.hpp"
+#include "utils.h"
+
 using namespace faster_lio;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 
 
 
@@ -207,12 +186,111 @@ public:
     ros::NodeHandle             nh;
 
 
+
+
+
+
+
+
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
     using IVoxType = IVox<3, IVoxNodeType::DEFAULT, PointType>;
+
+    // modules
     std::shared_ptr<IVoxType> ivox_ = nullptr;     
     IVoxType::Options ivox_options_;
+    std::shared_ptr<PointCloudPreprocess> preprocess_ = nullptr;  // point cloud preprocess
+    std::shared_ptr<ImuProcess> p_imu_ = nullptr;
+
+    //local map related
+    float det_range = 300.0f;
+    double cube_len_ = 0;
+    double filter_size_map_min_ = 0;
+    bool localmap_initialized_ = false;
+
+    //params
+    std::vector<double> extrinT_{3, 0.0};  // lidar-imu translation
+    std::vector<double> extrinR_{9, 0.0};  // lidar-imu rotation
+    std::string map_file_path_;
+
+    /// point clouds data
+    CloudPtr scan_undistort_{new PointCloudType()};   // scan after undistortion
+    CloudPtr scan_down_body_{new PointCloudType()};   // downsampled scan in body
+    CloudPtr scan_down_world_{new PointCloudType()};  // downsampled scan in world
+    std::vector<PointVector> nearest_points_;         // nearest points of current scan
+    common::VV4F corr_pts_;                           // inlier pts
+    common::VV4F corr_norm_;                          // inlier plane norms
+    pcl::VoxelGrid<PointType> voxel_scan_;            // voxel filter for current scan
+    std::vector<float> residuals_;                    // point-to-plane residuals
+    std::vector<bool> point_selected_surf_;           // selected points
+    common::VV4F plane_coef_;                         // plane coeffs
+
+    /// ros pub and sub stuffs
+    ros::Subscriber sub_pcl_;
+    ros::Subscriber sub_imu_;
+    ros::Publisher pub_laser_cloud_world_;
+    ros::Publisher pub_laser_cloud_body_;
+    ros::Publisher pub_laser_cloud_effect_world_;
+    ros::Publisher pub_odom_aft_mapped_;
+    ros::Publisher pub_path_;
+
+    std::mutex mtx_buffer_;
+    std::deque<double> time_buffer_;
+    std::deque<PointCloudType::Ptr> lidar_buffer_;
+    std::deque<sensor_msgs::Imu::ConstPtr> imu_buffer_;
+    nav_msgs::Odometry odom_aft_mapped_;
+
+    /// options
+    // bool time_sync_en_ = false;
+    // double timediff_lidar_wrt_imu_ = 0.0;
+    // double last_timestamp_lidar_ = 0;
+    // double lidar_end_time_ = 0;
+    // double last_timestamp_imu_ = -1.0;
+    // double first_lidar_time_ = 0.0;
+    // bool lidar_pushed_ = false;
+
+    // /// statistics and flags ///
+    // int scan_count_ = 0;
+    // int publish_count_ = 0;
+    // bool flg_first_scan_ = true;
+    // bool flg_EKF_inited_ = false;
+    // int pcd_index_ = 0;
+    // double lidar_mean_scantime_ = 0.0;
+    // int scan_num_ = 0;
+    // bool timediff_set_flg_ = false;
+    // int effect_feat_num_ = 0, frame_num_ = 0;
+
+    // ///////////////////////// EKF inputs and output ///////////////////////////////////////////////////////
+    // common::MeasureGroup measures_;                    // sync IMU and lidar scan
+    // esekfom::esekf<state_ikfom, 12, input_ikfom> kf_;  // esekf
+    // state_ikfom state_point_;                          // ekf current state
+    // vect3 pos_lidar_;                                  // lidar position after eskf update
+    // common::V3D euler_cur_ = common::V3D::Zero();      // rotation in euler angles
+    // bool extrinsic_est_en_ = true;
+
+    // /////////////////////////  debug show / save /////////////////////////////////////////////////////////
+    // bool run_in_offline_ = false;
+    // bool path_pub_en_ = true;
+    // bool scan_pub_en_ = false;
+    // bool dense_pub_en_ = false;
+    // bool scan_body_pub_en_ = false;
+    // bool scan_effect_pub_en_ = false;
+    // bool pcd_save_en_ = false;
+    // bool runtime_pos_log_ = true;
+    // int pcd_save_interval_ = -1;
+    // bool path_save_en_ = false;
+    // std::string dataset_;
+
+    // PointCloudType::Ptr pcl_wait_save_{new PointCloudType()};  // debug save
+    // nav_msgs::Path path_;
+    // geometry_msgs::PoseStamped msg_body_pose_;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
 
 
 
@@ -804,9 +882,46 @@ public:
     }
 
     std::thread m_thread_process;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     Fast_lio()
     {
         printf_line;
+
+
+
+
+
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        preprocess_.reset(new PointCloudPreprocess());
+        p_imu_.reset(new ImuProcess());
+        // LoadParams(nh);
+        // SubAndPubToROS(nh);
+        ivox_ = std::make_shared<IVoxType>(ivox_options_);
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
         pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100);
         pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>("/cloud_effected", 100);
         pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/Laser_map", 100);
@@ -894,8 +1009,8 @@ public:
 #endif
         std::shared_ptr<ImuProcess> p_imu(new ImuProcess());
         m_imu_process = p_imu;
-        fout_pre.open(DEBUG_FILE_DIR("mat_pre.txt"), std::ios::out);
-        fout_out.open(DEBUG_FILE_DIR("mat_out.txt"), std::ios::out);
+        fout_pre.open(common::DEBUG_FILE_DIR("mat_pre.txt"), std::ios::out);
+        fout_out.open(common::DEBUG_FILE_DIR("mat_out.txt"), std::ios::out);
         if (fout_pre && fout_out)
             std::cout << "~~~~" << ROOT_DIR << " file opened" << std::endl;
         else

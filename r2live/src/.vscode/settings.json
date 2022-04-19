@@ -100,6 +100,16 @@
         "eigen_types.h": "c",
         "ivox3d.h": "c",
         "options.h": "c",
-        "pointcloud_preprocess.h": "c"
+        "pointcloud_preprocess.h": "c",
+        "common_lib.h": "c",
+        "point_cloud.h": "c",
+        "pose6d.h": "c",
+        "tools_eigen.hpp": "c",
+        "core": "c",
+        "eigen_msg.h": "c",
+        "custommsg.h": "c",
+        "faster_common_lib.h": "c",
+        "eigen": "cpp",
+        "arpacksupport": "c"
     }
 }

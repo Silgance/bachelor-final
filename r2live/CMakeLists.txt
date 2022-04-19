@@ -62,7 +62,8 @@ include_directories(
   ${PYTHON_INCLUDE_DIRS}
   ./src/fast_lio/include
   ./src/tools/
-  /home/neu1/gzh/slam/faster/src/faster-lio/include
+  ./src/faster/
+  
   
 )
 
