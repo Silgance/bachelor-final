@@ -1,0 +1,22 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "",
+        "limitSymbolsToIncludedHeaders": true
+      },
+      "includePath": [
+        "/home/neu1/gzh/slam/r2/devel/include/**",
+        "/opt/ros/melodic/include/**",
+        "/home/neu1/gzh/slam/r2/src/r2live-master/camera_model/include/**",
+        "/usr/include/**",
+        "/home/neu1/gzh/slam/r2/src/r2live-master/r2live/src/**",
+        "/home/neu1/gzh/slam/faster/src/faster-lio/include/**",
+        "/home/neu1/gzh/slam/faster/devel/include/**"
+      ],
+      "name": "ROS",
+      "cppStandard": "c++17"
+    }
+  ],
+  "version": 4
+}
