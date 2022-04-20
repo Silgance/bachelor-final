@@ -1,3 +1,5 @@
+#ifndef __FAST_LIO__
+#define __FAST_LIO__
 #pragma once
 #include <omp.h>
 #include <mutex>
@@ -42,13 +44,13 @@
 #include "pointcloud_preprocess.h"
 #include "options.h"
 #include "faster_common_lib.h"
-// #include "imu_processing.hpp"
+#include "imu_processing.hpp"
 #include <condition_variable>
 #include "use-ikfom.hpp"
 #include "utils.h"
 #include "faster_so3_math.h"
 
-using namespace faster_lio;
+// using namespace faster_lio;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -196,13 +198,17 @@ public:
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-    using IVoxType = IVox<3, IVoxNodeType::DEFAULT, PointType>;
+    using IVoxType = faster_lio::IVox<3, faster_lio::IVoxNodeType::DEFAULT, PointType>;
+
+    float ESTI_PLANE_THRESHOLD = 0.1;
+
+
 
     // modules
     std::shared_ptr<IVoxType> ivox_ = nullptr;     
     IVoxType::Options ivox_options_;
-    std::shared_ptr<PointCloudPreprocess> preprocess_ = nullptr;  // point cloud preprocess
-    std::shared_ptr<ImuProcess> p_imu_ = nullptr;
+    std::shared_ptr<faster_lio::PointCloudPreprocess> preprocess_ = nullptr;  // point cloud preprocess
+    std::shared_ptr<faster_lio::ImuProcess> p_imu_ = nullptr;
 
     //local map related
     float det_range = 300.0f;
@@ -220,12 +226,12 @@ public:
     CloudPtr scan_down_body_{new PointCloudType()};   // downsampled scan in body
     CloudPtr scan_down_world_{new PointCloudType()};  // downsampled scan in world
     std::vector<PointVector> nearest_points_;         // nearest points of current scan
-    common::VV4F corr_pts_;                           // inlier pts
-    common::VV4F corr_norm_;                          // inlier plane norms
+    faster_lio::common::VV4F corr_pts_;                           // inlier pts
+    faster_lio::common::VV4F corr_norm_;                          // inlier plane norms
     pcl::VoxelGrid<PointType> voxel_scan_;            // voxel filter for current scan
     std::vector<float> residuals_;                    // point-to-plane residuals
     std::vector<bool> point_selected_surf_;           // selected points
-    common::VV4F plane_coef_;                         // plane coeffs
+    faster_lio::common::VV4F plane_coef_;                         // plane coeffs
 
     /// ros pub and sub stuffs
     ros::Subscriber sub_pcl_;
@@ -263,11 +269,11 @@ public:
     int effect_feat_num_ = 0, frame_num_ = 0;
 
     // ///////////////////////// EKF inputs and output ///////////////////////////////////////////////////////
-    common::MeasureGroup measures_;                    // sync IMU and lidar scan
-    esekfom::esekf<state_ikfom, 12, input_ikfom> kf_;  // esekf
-    state_ikfom state_point_;                          // ekf current state
-    vect3 pos_lidar_;                                  // lidar position after eskf update
-    common::V3D euler_cur_ = common::V3D::Zero();      // rotation in euler angles
+    faster_lio::common::MeasureGroup measures_;                    // sync IMU and lidar scan
+    esekfom::esekf<faster_lio::state_ikfom, 12, faster_lio::input_ikfom> kf_;  // esekf
+    faster_lio::state_ikfom state_point_;                          // ekf current state
+    faster_lio::vect3 pos_lidar_;                                  // lidar position after eskf update
+    faster_lio::common::V3D euler_cur_ = faster_lio::common::V3D::Zero();      // rotation in euler angles
     bool extrinsic_est_en_ = true;
 
     // /////////////////////////  debug show / save /////////////////////////////////////////////////////////
@@ -340,36 +346,6 @@ public:
 
         int reflection_map = intensity * 10000;
 
-        // //std::cout<<"DEBUG reflection_map "<<reflection_map<<std::endl;
-
-        // if (reflection_map < 30)
-        // {
-        //     int green = (reflection_map * 255 / 30);
-        //     po->r = 0;
-        //     po->g = green & 0xff;
-        //     po->b = 0xff;
-        // }
-        // else if (reflection_map < 90)
-        // {
-        //     int blue = (((90 - reflection_map) * 255) / 60);
-        //     po->r = 0x0;
-        //     po->g = 0xff;
-        //     po->b = blue & 0xff;
-        // }
-        // else if (reflection_map < 150)
-        // {
-        //     int red = ((reflection_map-90) * 255 / 60);
-        //     po->r = red & 0xff;
-        //     po->g = 0xff;
-        //     po->b = 0x0;
-        // }
-        // else
-        // {
-        //     int green = (((255-reflection_map) * 255) / (255-150));
-        //     po->r = 0xff;
-        //     po->g = green & 0xff;
-        //     po->b = 0;
-        // }
     }
 
     int cube_ind(const int &i, const int &j, const int &k)
@@ -898,7 +874,7 @@ public:
  * @param s kf state
  * @param ekfom_data H matrix
  */
-void ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) {
+    void ObsModel(faster_lio::state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) {
     int cnt_pts = scan_down_body_->size();
 
     std::vector<size_t> index(cnt_pts);
@@ -906,46 +882,42 @@ void ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data)
         index[i] = i;
     }
 
-    Timer::Evaluate(
-        [&, this]() {
-            auto R_wl = (s.rot * s.offset_R_L_I).cast<float>();
-            auto t_wl = (s.rot * s.offset_T_L_I + s.pos).cast<float>();
+    auto R_wl = (s.rot * s.offset_R_L_I).cast<float>();
+    auto t_wl = (s.rot * s.offset_T_L_I + s.pos).cast<float>();
 
-            /** closest surface search and residual computation **/
-            std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
-                PointType &point_body = scan_down_body_->points[i];
-                PointType &point_world = scan_down_world_->points[i];
+    /** closest surface search and residual computation **/
+    std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
+        PointType &point_body = scan_down_body_->points[i];
+        PointType &point_world = scan_down_world_->points[i];
 
-                /* transform to world frame */
-                common::V3F p_body = point_body.getVector3fMap();
-                point_world.getVector3fMap() = R_wl * p_body + t_wl;
-                point_world.intensity = point_body.intensity;
+        /* transform to world frame */
+        faster_lio::common::V3F p_body = point_body.getVector3fMap();
+        point_world.getVector3fMap() = R_wl * p_body + t_wl;
+        point_world.intensity = point_body.intensity;
 
-                auto &points_near = nearest_points_[i];
-                if (ekfom_data.converge) {
-                    /** Find the closest surfaces in the map **/
-                    ivox_->GetClosestPoint(point_world, points_near, NUM_MATCH_POINTS);
-                    point_selected_surf_[i] = points_near.size() >= options::MIN_NUM_MATCH_POINTS;
-                    if (point_selected_surf_[i]) {
-                        point_selected_surf_[i] =
-                            common::esti_plane(plane_coef_[i], points_near, options::ESTI_PLANE_THRESHOLD);
-                    }
-                }
+        auto &points_near = nearest_points_[i];
+        if (ekfom_data.converge) {
+            /** Find the closest surfaces in the map **/
+            ivox_->GetClosestPoint(point_world, points_near, NUM_MATCH_POINTS);
+            point_selected_surf_[i] = points_near.size() >= faster_lio::options::MIN_NUM_MATCH_POINTS;
+            if (point_selected_surf_[i]) {
+                point_selected_surf_[i] =
+                    faster_lio::common::esti_plane(plane_coef_[i], points_near, ESTI_PLANE_THRESHOLD);
+            }
+        }
 
-                if (point_selected_surf_[i]) {
-                    auto temp = point_world.getVector4fMap();
-                    temp[3] = 1.0;
-                    float pd2 = plane_coef_[i].dot(temp);
+        if (point_selected_surf_[i]) {
+            auto temp = point_world.getVector4fMap();
+            temp[3] = 1.0;
+            float pd2 = plane_coef_[i].dot(temp);
 
-                    bool valid_corr = p_body.norm() > 81 * pd2 * pd2;
-                    if (valid_corr) {
-                        point_selected_surf_[i] = true;
-                        residuals_[i] = pd2;
-                    }
-                }
-            });
-        },
-        "    ObsModel (Lidar Match)");
+            bool valid_corr = p_body.norm() > 81 * pd2 * pd2;
+            if (valid_corr) {
+                point_selected_surf_[i] = true;
+                residuals_[i] = pd2;
+            }
+        }
+    });
 
     effect_feat_num_ = 0;
 
@@ -969,45 +941,43 @@ void ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data)
         return;
     }
 
-    Timer::Evaluate(
-        [&, this]() {
-            /*** Computation of Measurement Jacobian matrix H and measurements vector ***/
-            ekfom_data.h_x = Eigen::MatrixXd::Zero(effect_feat_num_, 12);  // 23
-            ekfom_data.h.resize(effect_feat_num_);
+    
+    /*** Computation of Measurement Jacobian matrix H and measurements vector ***/
+    ekfom_data.h_x = Eigen::MatrixXd::Zero(effect_feat_num_, 12);  // 23
+    ekfom_data.h.resize(effect_feat_num_);
 
-            index.resize(effect_feat_num_);
-            const common::M3F off_R = s.offset_R_L_I.toRotationMatrix().cast<float>();
-            const common::V3F off_t = s.offset_T_L_I.cast<float>();
-            const common::M3F Rt = s.rot.toRotationMatrix().transpose().cast<float>();
+    index.resize(effect_feat_num_);
+    const faster_lio::common::M3F off_R = s.offset_R_L_I.toRotationMatrix().cast<float>();
+    const faster_lio::common::V3F off_t = s.offset_T_L_I.cast<float>();
+    const faster_lio::common::M3F Rt = s.rot.toRotationMatrix().transpose().cast<float>();
 
-            std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
-                common::V3F point_this_be = corr_pts_[i].head<3>();
-                common::M3F point_be_crossmat = SKEW_SYM_MATRIX(point_this_be);
-                common::V3F point_this = off_R * point_this_be + off_t;
-                common::M3F point_crossmat = SKEW_SYM_MATRIX(point_this);
+    std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
+        faster_lio::common::V3F point_this_be = corr_pts_[i].head<3>();
+        faster_lio::common::M3F point_be_crossmat = faster_lio::SKEW_SYM_MATRIX(point_this_be);
+        faster_lio::common::V3F point_this = off_R * point_this_be + off_t;
+        faster_lio::common::M3F point_crossmat = faster_lio::SKEW_SYM_MATRIX(point_this);
 
-                /*** get the normal vector of closest surface/corner ***/
-                common::V3F norm_vec = corr_norm_[i].head<3>();
+        /*** get the normal vector of closest surface/corner ***/
+        faster_lio::common::V3F norm_vec = corr_norm_[i].head<3>();
 
-                /*** calculate the Measurement Jacobian matrix H ***/
-                common::V3F C(Rt * norm_vec);
-                common::V3F A(point_crossmat * C);
+        /*** calculate the Measurement Jacobian matrix H ***/
+        faster_lio::common::V3F C(Rt * norm_vec);
+        faster_lio::common::V3F A(point_crossmat * C);
 
-                if (extrinsic_est_en_) {
-                    common::V3F B(point_be_crossmat * off_R.transpose() * C);
-                    ekfom_data.h_x.block<1, 12>(i, 0) << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], B[0],
-                        B[1], B[2], C[0], C[1], C[2];
-                } else {
-                    ekfom_data.h_x.block<1, 12>(i, 0) << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], 0.0,
-                        0.0, 0.0, 0.0, 0.0, 0.0;
-                }
+        if (extrinsic_est_en_) {
+            faster_lio::common::V3F B(point_be_crossmat * off_R.transpose() * C);
+            ekfom_data.h_x.block<1, 12>(i, 0) << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], B[0],
+                B[1], B[2], C[0], C[1], C[2];
+        } else {
+            ekfom_data.h_x.block<1, 12>(i, 0) << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], 0.0,
+                0.0, 0.0, 0.0, 0.0, 0.0;
+        }
 
-                /*** Measurement: distance to the closest surface/corner ***/
-                ekfom_data.h(i) = -corr_pts_[i][3];
-            });
-        },
-        "    ObsModel (IEKF Build Jacobian)");
+        /*** Measurement: distance to the closest surface/corner ***/
+        ekfom_data.h(i) = -corr_pts_[i][3];
+    });
 }
+
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1019,33 +989,6 @@ void ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data)
     Fast_lio()
     {
         printf_line;
-
-
-
-
-
-
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        preprocess_.reset(new PointCloudPreprocess());
-        p_imu_.reset(new ImuProcess());
-        // LoadParams(nh);
-        // SubAndPubToROS(nh);
-        ivox_ = std::make_shared<IVoxType>(ivox_options_);
-
-        // esekf init
-        std::vector<double> epsi(23, 0.001);
-        kf_.init_dyn_share(
-            get_f, df_dx, df_dw,
-            [this](state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) { ObsModel(s, ekfom_data); },
-            options::NUM_MAX_ITERATIONS, epsi.data());
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-
-
-
-
-
         pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100);
         pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>("/cloud_effected", 100);
         pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/Laser_map", 100);
@@ -1086,6 +1029,37 @@ void ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data)
         printf_line;
         m_thread_process = std::thread(&Fast_lio::process, this);
         printf_line;
+
+        
+
+
+
+
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        preprocess_.reset(new faster_lio::PointCloudPreprocess());
+        p_imu_.reset(new faster_lio::ImuProcess());
+        // LoadParams(nh);
+        // SubAndPubToROS(nh);
+        ivox_ = std::make_shared<IVoxType>(ivox_options_);
+
+        // esekf init
+        std::vector<double> epsi(23, 0.001);
+        kf_.init_dyn_share(
+            faster_lio::get_f, faster_lio::df_dx, faster_lio::df_dw,
+            [this](faster_lio::state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) { ObsModel(s, ekfom_data); },
+            NUM_MAX_ITERATIONS, epsi.data());
+        
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
     }
     ~Fast_lio(){};
 
@@ -1133,8 +1107,8 @@ void ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data)
 #endif
         std::shared_ptr<ImuProcess> p_imu(new ImuProcess());
         m_imu_process = p_imu;
-        fout_pre.open(common::DEBUG_FILE_DIR("mat_pre.txt"), std::ios::out);
-        fout_out.open(common::DEBUG_FILE_DIR("mat_out.txt"), std::ios::out);
+        fout_pre.open(faster_lio::common::DEBUG_FILE_DIR("mat_pre.txt"), std::ios::out);
+        fout_out.open(faster_lio::common::DEBUG_FILE_DIR("mat_out.txt"), std::ios::out);
         if (fout_pre && fout_out)
             std::cout << "~~~~" << ROOT_DIR << " file opened" << std::endl;
         else
@@ -1846,3 +1820,6 @@ void ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data)
         return 0;
     }
 };
+
+
+#endif

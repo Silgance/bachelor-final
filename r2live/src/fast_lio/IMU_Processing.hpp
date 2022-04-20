@@ -26,11 +26,14 @@
 #include <geometry_msgs/Vector3.h>
 #include "../factor/integration_base.h"
 
+
+#include "imu_processing.hpp"
+
 /// *************Preconfiguration
 
-#define MAX_INI_COUNT (0)
+// #define MAX_INI_COUNT (0)
 
-const inline bool time_list(PointType &x, PointType &y) {return (x.curvature < y.curvature);};
+// const inline bool time_list(PointType &x, PointType &y) {return (x.curvature < y.curvature);};
 bool check_state(StatesGroup &state_inout);
 void check_in_out_state(const StatesGroup &state_in, StatesGroup &state_inout);
 /// *************IMU Process and undistortion

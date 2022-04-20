@@ -61,7 +61,7 @@ void ImuProcess::IMU_Initial(const MeasureGroup &meas, StatesGroup &state_inout,
 {
   /** 1. initializing the gravity, gyro bias, acc and gyro covariance
    ** 2. normalize the acceleration measurenments to unit gravity **/
-  ROS_INFO("IMU Initializing: %.1f %%", double(N) / MAX_INI_COUNT * 100);
+  ROS_INFO("IMU Initializing: %.1f %%", double(N) / faster_lio::MAX_INI_COUNT * 100);
   Eigen::Vector3d cur_acc, cur_gyr;
 
   if (b_first_frame_)
@@ -107,7 +107,7 @@ void ImuProcess::lic_state_propagate(const MeasureGroup &meas, StatesGroup &stat
 
   /*** sort point clouds by offset time ***/
   PointCloudXYZI pcl_out = *(meas.lidar);
-  std::sort(pcl_out.points.begin(), pcl_out.points.end(), time_list);
+  std::sort(pcl_out.points.begin(), pcl_out.points.end(), faster_lio::time_list);
   const double &pcl_end_time = pcl_beg_time + pcl_out.points.back().curvature / double(1000);
   double end_pose_dt = pcl_end_time - imu_end_time;
   // if(end_pose_dt > 0)
@@ -498,7 +498,7 @@ void ImuProcess::lic_point_cloud_undistort(const MeasureGroup &meas, const State
   const double &pcl_beg_time = meas.lidar_beg_time;
   /*** sort point clouds by offset time ***/
   pcl_out = *(meas.lidar);
-  std::sort(pcl_out.points.begin(), pcl_out.points.end(), time_list);
+  std::sort(pcl_out.points.begin(), pcl_out.points.end(), faster_lio::time_list);
   const double &pcl_end_time = pcl_beg_time + pcl_out.points.back().curvature / double(1000);
   /*std::cout << "[ IMU Process ]: Process lidar from " << pcl_beg_time - g_lidar_star_tim << " to " << pcl_end_time- g_lidar_star_tim << ", "
             << meas.imu.size() << " imu msgs from " << imu_beg_time- g_lidar_star_tim << " to " << imu_end_time- g_lidar_star_tim 
@@ -636,7 +636,7 @@ void ImuProcess::Process(const MeasureGroup &meas, StatesGroup &stat, PointCloud
 
     last_imu_ = meas.imu.back();
 
-    if (init_iter_num > MAX_INI_COUNT)
+    if (init_iter_num > faster_lio::MAX_INI_COUNT)
     {
       imu_need_init_ = false;
       // std::cout<<"mean acc: "<<mean_acc<<" acc measures in word frame:"<<state.rot_end.transpose()*mean_acc<<std::endl;

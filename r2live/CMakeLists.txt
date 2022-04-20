@@ -91,6 +91,7 @@ add_executable(r2live
     src/fast_lio/include/kd_tree/ikd_Tree.cpp
     src/fast_lio/include/FOV_Checker/FOV_Checker.cpp 
     src/fast_lio/IMU_Processing.cpp
+    src/faster/imu_processing.cpp
     )
 
 target_link_libraries(r2live ${catkin_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES}) 
