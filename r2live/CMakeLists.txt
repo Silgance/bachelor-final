@@ -92,8 +92,20 @@ add_executable(r2live
     src/fast_lio/include/FOV_Checker/FOV_Checker.cpp 
     src/fast_lio/IMU_Processing.cpp
     src/faster/imu_processing.cpp
+    src/faster/laser_mapping.cc
+    src/faster/utils.cc
+    src/faster/options.cc
+    src/faster/pointcloud_preprocess.cc
     )
 
-target_link_libraries(r2live ${catkin_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES}) 
+add_dependencies(r2live  livox_ros_driver_gencpp)
+
+target_link_libraries(r2live ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES}
+yaml-cpp
+/usr/local/lib/libtbb.so
+/usr/local/lib/libtbbmalloc.so
+/usr/local/lib/libtbbmalloc_proxy.so
+glog
+) 
 
 

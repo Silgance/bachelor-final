@@ -49,6 +49,7 @@
 #include "use-ikfom.hpp"
 #include "utils.h"
 #include "faster_so3_math.h"
+#include "laser_mapping.h"
 
 // using namespace faster_lio;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -197,101 +198,13 @@ public:
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-    using IVoxType = faster_lio::IVox<3, faster_lio::IVoxNodeType::DEFAULT, PointType>;
+    
 
-    float ESTI_PLANE_THRESHOLD = 0.1;
+    
+    std::shared_ptr<faster_lio::LaserMapping> laser_mapping;
 
 
-
-    // modules
-    std::shared_ptr<IVoxType> ivox_ = nullptr;     
-    IVoxType::Options ivox_options_;
-    std::shared_ptr<faster_lio::PointCloudPreprocess> preprocess_ = nullptr;  // point cloud preprocess
-    std::shared_ptr<faster_lio::ImuProcess> p_imu_ = nullptr;
-
-    //local map related
-    float det_range = 300.0f;
-    double cube_len_ = 0;
-    double filter_size_map_min_ = 0;
-    bool localmap_initialized_ = false;
-
-    //params
-    std::vector<double> extrinT_{3, 0.0};  // lidar-imu translation
-    std::vector<double> extrinR_{9, 0.0};  // lidar-imu rotation
-    std::string map_file_path_;
-
-    /// point clouds data
-    CloudPtr scan_undistort_{new PointCloudType()};   // scan after undistortion
-    CloudPtr scan_down_body_{new PointCloudType()};   // downsampled scan in body
-    CloudPtr scan_down_world_{new PointCloudType()};  // downsampled scan in world
-    std::vector<PointVector> nearest_points_;         // nearest points of current scan
-    faster_lio::common::VV4F corr_pts_;                           // inlier pts
-    faster_lio::common::VV4F corr_norm_;                          // inlier plane norms
-    pcl::VoxelGrid<PointType> voxel_scan_;            // voxel filter for current scan
-    std::vector<float> residuals_;                    // point-to-plane residuals
-    std::vector<bool> point_selected_surf_;           // selected points
-    faster_lio::common::VV4F plane_coef_;                         // plane coeffs
-
-    /// ros pub and sub stuffs
-    ros::Subscriber sub_pcl_;
-    ros::Subscriber sub_imu_;
-    ros::Publisher pub_laser_cloud_world_;
-    ros::Publisher pub_laser_cloud_body_;
-    ros::Publisher pub_laser_cloud_effect_world_;
-    ros::Publisher pub_odom_aft_mapped_;
-    ros::Publisher pub_path_;
-
-    std::mutex mtx_buffer_;
-    std::deque<double> time_buffer_;
-    std::deque<PointCloudType::Ptr> lidar_buffer_;
-    std::deque<sensor_msgs::Imu::ConstPtr> imu_buffer_;
-    nav_msgs::Odometry odom_aft_mapped_;
-
-    /// options
-    // bool time_sync_en_ = false;
-    // double timediff_lidar_wrt_imu_ = 0.0;
-    // double last_timestamp_lidar_ = 0;
-    // double lidar_end_time_ = 0;
-    // double last_timestamp_imu_ = -1.0;
-    // double first_lidar_time_ = 0.0;
-    // bool lidar_pushed_ = false;
-
-    // /// statistics and flags ///
-    // int scan_count_ = 0;
-    // int publish_count_ = 0;
-    // bool flg_first_scan_ = true;
-    // bool flg_EKF_inited_ = false;
-    // int pcd_index_ = 0;
-    // double lidar_mean_scantime_ = 0.0;
-    // int scan_num_ = 0;
-    // bool timediff_set_flg_ = false;
-    int effect_feat_num_ = 0, frame_num_ = 0;
-
-    // ///////////////////////// EKF inputs and output ///////////////////////////////////////////////////////
-    faster_lio::common::MeasureGroup measures_;                    // sync IMU and lidar scan
-    esekfom::esekf<faster_lio::state_ikfom, 12, faster_lio::input_ikfom> kf_;  // esekf
-    faster_lio::state_ikfom state_point_;                          // ekf current state
-    faster_lio::vect3 pos_lidar_;                                  // lidar position after eskf update
-    faster_lio::common::V3D euler_cur_ = faster_lio::common::V3D::Zero();      // rotation in euler angles
-    bool extrinsic_est_en_ = true;
-
-    // /////////////////////////  debug show / save /////////////////////////////////////////////////////////
-    // bool run_in_offline_ = false;
-    // bool path_pub_en_ = true;
-    // bool scan_pub_en_ = false;
-    // bool dense_pub_en_ = false;
-    // bool scan_body_pub_en_ = false;
-    // bool scan_effect_pub_en_ = false;
-    // bool pcd_save_en_ = false;
-    // bool runtime_pos_log_ = true;
-    // int pcd_save_interval_ = -1;
-    // bool path_save_en_ = false;
-    // std::string dataset_;
-
-    // PointCloudType::Ptr pcl_wait_save_{new PointCloudType()};  // debug save
-    // nav_msgs::Path path_;
-    // geometry_msgs::PoseStamped msg_body_pose_;
+    
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -867,116 +780,6 @@ public:
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-/**
- * Lidar point cloud registration
- * will be called by the eskf custom observation model
- * compute point-to-plane residual here
- * @param s kf state
- * @param ekfom_data H matrix
- */
-    void ObsModel(faster_lio::state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) {
-    int cnt_pts = scan_down_body_->size();
-
-    std::vector<size_t> index(cnt_pts);
-    for (size_t i = 0; i < index.size(); ++i) {
-        index[i] = i;
-    }
-
-    auto R_wl = (s.rot * s.offset_R_L_I).cast<float>();
-    auto t_wl = (s.rot * s.offset_T_L_I + s.pos).cast<float>();
-
-    /** closest surface search and residual computation **/
-    std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
-        PointType &point_body = scan_down_body_->points[i];
-        PointType &point_world = scan_down_world_->points[i];
-
-        /* transform to world frame */
-        faster_lio::common::V3F p_body = point_body.getVector3fMap();
-        point_world.getVector3fMap() = R_wl * p_body + t_wl;
-        point_world.intensity = point_body.intensity;
-
-        auto &points_near = nearest_points_[i];
-        if (ekfom_data.converge) {
-            /** Find the closest surfaces in the map **/
-            ivox_->GetClosestPoint(point_world, points_near, NUM_MATCH_POINTS);
-            point_selected_surf_[i] = points_near.size() >= faster_lio::options::MIN_NUM_MATCH_POINTS;
-            if (point_selected_surf_[i]) {
-                point_selected_surf_[i] =
-                    faster_lio::common::esti_plane(plane_coef_[i], points_near, ESTI_PLANE_THRESHOLD);
-            }
-        }
-
-        if (point_selected_surf_[i]) {
-            auto temp = point_world.getVector4fMap();
-            temp[3] = 1.0;
-            float pd2 = plane_coef_[i].dot(temp);
-
-            bool valid_corr = p_body.norm() > 81 * pd2 * pd2;
-            if (valid_corr) {
-                point_selected_surf_[i] = true;
-                residuals_[i] = pd2;
-            }
-        }
-    });
-
-    effect_feat_num_ = 0;
-
-    corr_pts_.resize(cnt_pts);
-    corr_norm_.resize(cnt_pts);
-    for (int i = 0; i < cnt_pts; i++) {
-        if (point_selected_surf_[i]) {
-            corr_norm_[effect_feat_num_] = plane_coef_[i];
-            corr_pts_[effect_feat_num_] = scan_down_body_->points[i].getVector4fMap();
-            corr_pts_[effect_feat_num_][3] = residuals_[i];
-
-            effect_feat_num_++;
-        }
-    }
-    corr_pts_.resize(effect_feat_num_);
-    corr_norm_.resize(effect_feat_num_);
-
-    if (effect_feat_num_ < 1) {
-        ekfom_data.valid = false;
-        LOG(WARNING) << "No Effective Points!";
-        return;
-    }
-
-    
-    /*** Computation of Measurement Jacobian matrix H and measurements vector ***/
-    ekfom_data.h_x = Eigen::MatrixXd::Zero(effect_feat_num_, 12);  // 23
-    ekfom_data.h.resize(effect_feat_num_);
-
-    index.resize(effect_feat_num_);
-    const faster_lio::common::M3F off_R = s.offset_R_L_I.toRotationMatrix().cast<float>();
-    const faster_lio::common::V3F off_t = s.offset_T_L_I.cast<float>();
-    const faster_lio::common::M3F Rt = s.rot.toRotationMatrix().transpose().cast<float>();
-
-    std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
-        faster_lio::common::V3F point_this_be = corr_pts_[i].head<3>();
-        faster_lio::common::M3F point_be_crossmat = faster_lio::SKEW_SYM_MATRIX(point_this_be);
-        faster_lio::common::V3F point_this = off_R * point_this_be + off_t;
-        faster_lio::common::M3F point_crossmat = faster_lio::SKEW_SYM_MATRIX(point_this);
-
-        /*** get the normal vector of closest surface/corner ***/
-        faster_lio::common::V3F norm_vec = corr_norm_[i].head<3>();
-
-        /*** calculate the Measurement Jacobian matrix H ***/
-        faster_lio::common::V3F C(Rt * norm_vec);
-        faster_lio::common::V3F A(point_crossmat * C);
-
-        if (extrinsic_est_en_) {
-            faster_lio::common::V3F B(point_be_crossmat * off_R.transpose() * C);
-            ekfom_data.h_x.block<1, 12>(i, 0) << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], B[0],
-                B[1], B[2], C[0], C[1], C[2];
-        } else {
-            ekfom_data.h_x.block<1, 12>(i, 0) << norm_vec[0], norm_vec[1], norm_vec[2], A[0], A[1], A[2], 0.0,
-                0.0, 0.0, 0.0, 0.0, 0.0;
-        }
-
-        /*** Measurement: distance to the closest surface/corner ***/
-        ekfom_data.h(i) = -corr_pts_[i][3];
-    });
-}
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1037,19 +840,8 @@ public:
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        preprocess_.reset(new faster_lio::PointCloudPreprocess());
-        p_imu_.reset(new faster_lio::ImuProcess());
-        // LoadParams(nh);
-        // SubAndPubToROS(nh);
-        ivox_ = std::make_shared<IVoxType>(ivox_options_);
-
-        // esekf init
-        std::vector<double> epsi(23, 0.001);
-        kf_.init_dyn_share(
-            faster_lio::get_f, faster_lio::df_dx, faster_lio::df_dw,
-            [this](faster_lio::state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) { ObsModel(s, ekfom_data); },
-            NUM_MAX_ITERATIONS, epsi.data());
-        
+        laser_mapping = std::make_shared<faster_lio::LaserMapping>();
+        laser_mapping->InitROS(nh);
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

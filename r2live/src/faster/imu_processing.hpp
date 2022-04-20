@@ -10,7 +10,7 @@
 #include <fstream>
 
 #include "faster_common_lib.h"
-#include "so3_math.h"
+#include "faster_so3_math.h"
 #include "use-ikfom.hpp"
 #include "utils.h"
 

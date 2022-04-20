@@ -111,6 +111,7 @@
         "faster_common_lib.h": "c",
         "eigen": "cpp",
         "arpacksupport": "c",
-        "__functional_03": "cpp"
+        "__functional_03": "cpp",
+        "imu_processing.hpp": "c"
     }
 }
