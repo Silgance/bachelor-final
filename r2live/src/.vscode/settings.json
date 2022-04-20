@@ -110,6 +110,7 @@
         "custommsg.h": "c",
         "faster_common_lib.h": "c",
         "eigen": "cpp",
-        "arpacksupport": "c"
+        "arpacksupport": "c",
+        "__functional_03": "cpp"
     }
 }
